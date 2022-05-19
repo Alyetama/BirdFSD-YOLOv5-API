@@ -34,7 +34,8 @@ def get_latest_model_weights(s3_client, mongodb_client, skip_download=False):
     latest_model_ts = max(db.model.find().distinct('added_on'))
     model_document = db.model.find_one({'added_on': latest_model_ts})
     model_version = model_document['version']
-    model_object_name = f'{model_version}.pt'
+    model_name = model_document['name']
+    model_object_name = f'{model_name}-v{model_version}.pt'
     if skip_download:
         return model_version, model_object_name
 
