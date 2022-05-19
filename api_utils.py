@@ -37,22 +37,22 @@ def get_latest_model_weights(s3_client, mongodb_client, skip_download=False):
     model_name = model_document['name']
     model_object_name = f'{model_name}-v{model_version}.pt'
     if skip_download:
-        return model_version, model_object_name
+        return model_version, model_name, model_object_name
 
     weights_url = s3_client.fget_object('model', model_object_name,
                                         model_object_name)
     assert Path(model_object_name).exists()
 
-    return model_version, model_object_name
+    return model_version, model_name, model_object_name
 
 
 def init_model(s3, db):
-    model_version, model_weights = get_latest_model_weights(s3,
+    model_version, model_name, model_weights = get_latest_model_weights(s3,
                                                             db,
                                                             skip_download=True)
 
     if not Path(model_weights).exists():
-        model_version, model_weights = get_latest_model_weights(s3, db)
+        model_version, model_name, model_weights = get_latest_model_weights(s3, db)
 
     model = torch.hub.load('ultralytics/yolov5', 'custom', path=model_weights)
-    return model_version, model_weights, model
+    return model_version, model_name, model_weights, model

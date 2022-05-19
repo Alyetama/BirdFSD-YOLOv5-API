@@ -24,7 +24,7 @@ load_dotenv()
 
 s3 = create_s3_client()
 db = create_mongodb_client()
-model_version, model_weights, model = init_model(s3, db)
+model_version, model_name, model_weights, model = init_model(s3, db)
 
 app = FastAPI()
 
@@ -133,10 +133,8 @@ def predict_endpoint(file: UploadFile, download: bool = False):
             'labeled_image_url': url,
             'predictions': pred_results,
             'model': {
-                'name':
-                model_version.split('-v')[0],
-                'version':
-                model_version.split('-v')[1],
+                'name': model_name,
+                'version': model_version,
                 'page': page
             }
         }
