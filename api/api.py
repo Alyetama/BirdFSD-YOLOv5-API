@@ -2,23 +2,25 @@
 # coding: utf-8
 
 import hashlib
+import io
 import json
 import mimetypes
 import os
 import tempfile
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import pymongo
 import requests
-from fic import fic
 from PIL import Image
 from dotenv import load_dotenv
 from fastapi import FastAPI, Response, UploadFile
+from fastapi.responses import StreamingResponse
+from fic import fic
 
-from api_utils import create_s3_client, create_mongodb_client, init_model
+from api_utils import create_mongodb_client, create_s3_client, init_model
 
 load_dotenv()
 
@@ -40,6 +42,16 @@ class PrettyJSONResponse(Response):
             indent=4,
             # separators=(", ", ": "),
         ).encode("utf-8")
+
+
+class _PrettyJSONResponse(Response):
+    media_type = "application/json"
+
+    def render(self, content: Any) -> bytes:
+        return json.dumps(content,
+                          ensure_ascii=False,
+                          allow_nan=False,
+                          indent=1).encode("utf-8")
 
 
 def species_info(species_name):
@@ -74,6 +86,30 @@ def model_info(version):
     return model
 
 
+def create_cropped_images_object(pred):
+    results = []
+    cropped_imgs = pred.crop(save=False)
+    with tempfile.NamedTemporaryFile(suffix='.zip') as f:
+        with zipfile.ZipFile(f, mode='w') as zf:
+            for cropped_img in cropped_imgs:
+                with tempfile.NamedTemporaryFile() as cf:
+                    im = Image.fromarray(cropped_img['im'])
+                    im.save(cf, 'JPEG', quality=100, subsampling=0)
+                    label = ' '.join(cropped_img['label'].split(' ')[:-1])
+                    conf = cropped_img['label'].split(' ')[-1]
+                    img_name = f'{label}/{uuid.uuid4()}.jpg'
+                    zf.write(cf.name, arcname=img_name)
+                    results.append({img_name: {'label': label, 'conf': conf}})
+            with tempfile.NamedTemporaryFile() as rf:
+                rf.write(json.dumps(results, indent=4).encode('utf-8'))
+                rf.seek(0)
+                zf.write(rf.name, arcname='results.json')
+        f.flush()
+        f.seek(0)
+        obj = io.BytesIO(f.read())
+    return obj
+
+
 @app.get("/model")
 def get_model_info(version: str = 'latest'):
     model = model_info(version)
@@ -81,13 +117,24 @@ def get_model_info(version: str = 'latest'):
 
 
 @app.post("/predict")
-def predict_endpoint(file: UploadFile, download: bool = False):
+def predict_endpoint(file: UploadFile,
+                     download: bool = False,
+                     download_cropped: bool = False):
     image = Image.open(file.file)
+
     content_type = mimetypes.guess_type(file.filename)[0]
 
     pred = model(image)
     pred_results = pd.concat(pred.pandas().xyxyn).T.to_dict()
+
+    if download_cropped:
+        obj = create_cropped_images_object(pred)
+        return StreamingResponse(obj,
+                                 status_code=200,
+                                 media_type='application/zip')
+
     for k in pred_results:
+
         K = pred_results[k]
         K.pop('class')
         K.update({'confidence': round(K['confidence'], 4)})
@@ -127,8 +174,9 @@ def predict_endpoint(file: UploadFile, download: bool = False):
 
     res = {
         'results': {
-            'input_image': {'name': file.filename,
-            'hash': hashlib.md5(file.file.read()).hexdigest()
+            'input_image': {
+                'name': file.filename,
+                'hash': hashlib.md5(file.file.read()).hexdigest()
             },
             'labeled_image_url': url,
             'predictions': pred_results,

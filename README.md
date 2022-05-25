@@ -24,13 +24,14 @@ pip install -r requirements.txt
 - Run locally
 
 ```sh
+cd api
 uvicorn api:app --reload
 ```
 
 ## Example
 
 ```sh
-curl -X POST "http://127.0.0.1:8000/predict" -F file="@demo/demo.png"
+curl -X POST "http://127.0.0.1:8000/predict" -F file="@../demo/demo.png"
 ```
 
 ```json

@@ -12,3 +12,5 @@ tqdm~=4.64.0
 fic>=0.8
 opencv-python-headless~=4.5.5.64
 python-multipart~=0.0.5
+fastapi_jwt_auth~=0.5.0
+pydantic~=1.8.2
