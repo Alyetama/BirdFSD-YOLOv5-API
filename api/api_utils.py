@@ -18,11 +18,14 @@ def keyboard_interrupt_handler(sig: int, _) -> None:
     sys.exit(1)
 
 
-def create_s3_client():
-    return Minio(os.environ['S3_ENDPOINT'],
-                 access_key=os.environ['S3_ACCESS_KEY'],
-                 secret_key=os.environ['S3_SECRET_KEY'],
-                 region=os.environ['S3_REGION'])
+def create_s3_client(api_s3=False):
+    prefix = ''
+    if api_s3:
+        prefix = 'API_'
+    return Minio(os.environ[f'{prefix}S3_ENDPOINT'],
+                 access_key=os.environ[f'{prefix}S3_ACCESS_KEY'],
+                 secret_key=os.environ[f'{prefix}S3_SECRET_KEY'],
+                 region=os.environ[f'{prefix}S3_REGION'])
 
 
 def create_mongodb_client():

@@ -183,3 +183,4 @@ demo.sh
 api/api_dev.py
 birdfsd_yolov5/
 label-studio-workers/
+.python-version

@@ -18,17 +18,27 @@ from PIL import Image
 from dotenv import load_dotenv
 from fastapi import FastAPI, Response, UploadFile
 from fastapi.responses import StreamingResponse
-from fic import fic
+from rayim import rayim
 
 from api_utils import create_mongodb_client, create_s3_client, init_model
 
+#------------------------------------------------------------------------------
+
 load_dotenv()
 
-s3 = create_s3_client()
+s3 = create_s3_client(api_s3=False)
+api_s3 = create_s3_client(api_s3=True)
 db = create_mongodb_client()
 model_version, model_name, model_weights, model = init_model(s3, db)
 
+if os.getenv('MODEL_REPO'):
+    page = f'{os.getenv("MODEL_REPO")}/releases/tag/{model_version}'
+else:
+    page = None
+
 app = FastAPI()
+
+#------------------------------------------------------------------------------
 
 
 class PrettyJSONResponse(Response):
@@ -54,6 +64,9 @@ class _PrettyJSONResponse(Response):
                           indent=1).encode("utf-8")
 
 
+#------------------------------------------------------------------------------
+
+
 def species_info(species_name):
     if '(' in species_name:
         species_name = species_name.split('(')[1].split(')')[0]
@@ -72,6 +85,9 @@ def species_info(species_name):
     return compact_info
 
 
+#------------------------------------------------------------------------------
+
+
 def model_info(version):
     col = db[os.environ['DB_NAME']].model
     if version == 'latest':
@@ -84,6 +100,9 @@ def model_info(version):
     model['trained_on'] = str(model['trained_on'])
     model.pop('projects')
     return model
+
+
+#------------------------------------------------------------------------------
 
 
 def create_cropped_images_object(pred):
@@ -110,10 +129,38 @@ def create_cropped_images_object(pred):
     return obj
 
 
+#------------------------------------------------------------------------------
+
+
 @app.get("/model")
 def get_model_info(version: str = 'latest'):
     model = model_info(version)
     return PrettyJSONResponse(status_code=200, content=model)
+
+
+#------------------------------------------------------------------------------
+
+
+def results_dict(name, _hash, labeled_image_url, predictions, model_name,
+                 model_version, page):
+    return {
+        'results': {
+            'input_image': {
+                'name': name,
+                'hash': _hash
+            },
+            'labeled_image_url': labeled_image_url,
+            'predictions': predictions,
+            'model': {
+                'name': model_name,
+                'version': model_version,
+                'page': page
+            }
+        }
+    }
+
+
+#------------------------------------------------------------------------------
 
 
 @app.post("/predict")
@@ -121,11 +168,17 @@ def predict_endpoint(file: UploadFile,
                      download: bool = False,
                      download_cropped: bool = False):
     image = Image.open(file.file)
+    _hash = hashlib.md5(file.file.read()).hexdigest()
 
     content_type = mimetypes.guess_type(file.filename)[0]
 
     pred = model(image)
     pred_results = pd.concat(pred.pandas().xyxyn).T.to_dict()
+
+    if not pred_results:
+        res = results_dict(file.filename, _hash, None, pred_results,
+                           model_name, model_version, page)
+        return PrettyJSONResponse(status_code=200, content=res)
 
     if download_cropped:
         obj = create_cropped_images_object(pred)
@@ -150,7 +203,7 @@ def predict_endpoint(file: UploadFile,
     with tempfile.NamedTemporaryFile() as f:
         im.save(f, format=content_type.split('/')[1])
 
-        _ = fic.compress(f.name, to_jpeg=True, save_to=f.name)
+        _ = rayim.compress(f.name, to_jpeg=True, save_to=f.name)
         f.seek(0)
 
         if download:
@@ -159,33 +212,15 @@ def predict_endpoint(file: UploadFile,
         length = Path(f.name).stat().st_size
         out_file = f'{str(uuid.uuid4()).split("-")[-1]}.jpg'
 
-        s3.put_object(bucket_name='api',
-                      object_name=out_file,
-                      data=f,
-                      length=length,
-                      content_type=content_type)
+        api_s3.put_object(bucket_name='api',
+                          object_name=out_file,
+                          data=f,
+                          length=length,
+                          content_type=content_type)
 
-    url = f'https://{os.environ["S3_ENDPOINT"]}/api/{out_file}'
+    url = f'https://{os.environ["API_S3_ENDPOINT"]}/api/{out_file}'
 
-    if os.getenv('MODEL_REPO'):
-        page = f'{os.getenv("MODEL_REPO")}/releases/tag/{model_version}'
-    else:
-        page = None
-
-    res = {
-        'results': {
-            'input_image': {
-                'name': file.filename,
-                'hash': hashlib.md5(file.file.read()).hexdigest()
-            },
-            'labeled_image_url': url,
-            'predictions': pred_results,
-            'model': {
-                'name': model_name,
-                'version': model_version,
-                'page': page
-            }
-        }
-    }
+    res = results_dict(file.filename, _hash, url, pred_results, model_name,
+                       model_version, page)
 
     return PrettyJSONResponse(status_code=200, content=res)
