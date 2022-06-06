@@ -49,8 +49,7 @@ class PrettyJSONResponse(Response):
             content,
             ensure_ascii=False,
             allow_nan=False,
-            indent=4,
-            # separators=(", ", ": "),
+            indent=4
         ).encode("utf-8")
 
 
@@ -98,7 +97,6 @@ def model_info(version):
     model.pop('_id')
     model['added_on'] = str(model['added_on'])
     model['trained_on'] = str(model['trained_on'])
-    model.pop('projects')
     return model
 
 
@@ -203,7 +201,7 @@ def predict_endpoint(file: UploadFile,
     with tempfile.NamedTemporaryFile() as f:
         im.save(f, format=content_type.split('/')[1])
 
-        _ = rayim.compress(f.name, to_jpeg=True, save_to=f.name)
+        _ = rayim.compress(f.name, to_jpeg=True)
         f.seek(0)
 
         if download:
